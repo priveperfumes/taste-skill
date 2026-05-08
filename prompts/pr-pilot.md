@@ -86,7 +86,7 @@ When you find issues, fix them in a single pilot commit per logical group (e.g.,
 
 ## CI-first rule (highest priority)
 
-**CI failures block everything.** If any CI check is `failed`, you must fix it BEFORE responding to code review comments. No exceptions. Review comments from CodeRabbit, Codex, or humans wait until CI is green. Rationale: CI red means the code is broken; reviewing broken code is wasted effort.
+**CI failures block everything.** If any CI check is `failed`, you must fix it BEFORE responding to code review comments. No exceptions. Review comments from CodeRabbit or humans wait until CI is green. Rationale: CI red means the code is broken; reviewing broken code is wasted effort.
 
 Check CI status **immediately** after reading the PR state using `gh pr checks $PR_NUMBER --repo $REPO`. This is the very first action after hydrating PR state, before any review or fix work.
 
@@ -98,14 +98,24 @@ After pushing fixes (or if there were none to push), check CI status **immediate
 
 **Active merge pattern:**
 1. Run `gh pr checks $PR_NUMBER --repo $REPO` to see current CI status.
-2. If all checks are `pass`/`success` → evaluate the merge gate immediately and merge.
+2. If all checks are `pass`/`success` → evaluate the merge gate. If the gate passes, enter the **merge cool-down** (see below).
 3. If checks are `pending`/`running` → **enable auto-merge** so GitHub merges when CI passes: `gh pr merge $PR_NUMBER --repo $REPO --squash --delete-branch --auto`. This avoids depending on a re-trigger.
 4. If any check `failed` → see `playbooks/ci-failure.md`.
-5. If no CI is configured (no checks found) → skip CI requirement, evaluate remaining merge gate conditions, and merge.
+5. If no CI is configured (no checks found) → skip CI requirement, evaluate remaining merge gate conditions, and enter the merge cool-down.
 
-For repos without a CI workflow: there are no CI checks to wait for. Evaluate the other merge gate conditions and merge immediately.
+For repos without a CI workflow: there are no CI checks to wait for. Evaluate the other merge gate conditions and enter the merge cool-down.
 
-CodeRabbit reviews: if it hasn't reviewed yet and the merge gate is otherwise satisfied, proceed without it. Don't block the merge waiting for a review that may never come.
+CodeRabbit reviews: if it hasn't reviewed yet and the merge gate is otherwise satisfied, proceed after the cool-down. Don't block beyond the cool-down waiting for a review that may never come.
+
+**Merge cool-down (5 minutes):**
+Before merging any PR, wait 5 minutes after the merge gate is first satisfied. This gives CodeRabbit, human reviewers, and other bots a window to comment.
+
+1. After the merge gate passes, run `sleep 300`.
+2. Re-check the merge gate in full (CI status, review threads, labels, draft state).
+3. If the gate is still satisfied → merge.
+4. If any new review threads, CI failures, or blocker labels appeared → abort merge, triage the new findings, and loop.
+5. **Skip the cool-down** if the PR has label `skip-cooldown` or `hotfix`, or if the event is `@claude merge` (explicit human override).
+6. **Skip the cool-down** for Dependabot lockfile-only / patch PRs (see `playbooks/dependabot.md` fast path).
 
 ## Merge gate
 
@@ -118,6 +128,7 @@ Before merging, verify **every** condition using `gh` CLI commands (MCP GitHub t
 - ✅ `mergeable_state != 'dirty'` (no merge conflicts) — check via `gh pr view $PR_NUMBER --repo $REPO --json mergeable`
 - ✅ No labels: `needs-human`, `claude-pilot-paused`, `do-not-merge`, `breaking-change`
 - ✅ PR is not a draft
+- ✅ `ALLOW_MERGE != "0"` — if this env var is `"0"`, do NOT merge. Instead: add label `ready-to-merge`, comment `🛩️ claude-pilot: merge gate satisfied, awaiting human merge (ALLOW_MERGE=0).`, and stop.
 
 If any condition fails, do not merge. Either fix what's fixable, or escalate (see "Escalation" below).
 
